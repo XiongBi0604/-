@@ -1,0 +1,62 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+'（1）随机生成时序数据'
+# 设置随机数生成器的种子，以保证每次运行代码时，生成的随机数（如噪声）都相同。
+np.random.seed(1)
+
+# np.linspace(0, 50, 500)用来生成一个包含500个随机数的数组，且这些随机数服从均匀分布U(0,50)，同时还充当时序数据中的数据。
+# np.sin(np.linspace(0, 50, 500))对上述生成的数组应用sin函数，生成一个正弦波
+# np.random.normal(scale=0.5, size=500)用来生成500个随机数（充当噪声），且这些随机数服从标准差为0.5，均值为0的正态分布。
+# np.sin(...) 和 np.random.normal(...) 相加，得到一个带有噪声的正弦波时序数据。
+time_series_data = np.sin(np.linspace(0, 50, 500)) + np.random.normal(scale=0.5, size=500)
+
+
+'（2）分析时序数据'
+'移动平均法(MA)'
+def MA(data,window_size):
+
+    # np.convolve()用来对时序数据进行卷积运算
+    # np.ones(window_size) / window_size ：创建了一个长度为 window_size 的数组，并将数组中的每个元素都设定为 1/window_size，这相当于求平均值窗口。
+    # mode=valid: 指定了卷积的模式，使得输出的结果只包含完全重叠的部分，因此结果的长度会比输入数据短。
+    result = np.convolve(data, np.ones(window_size) / window_size, mode='valid')
+    return result
+
+'简单指数平滑法(SES)'
+def SES(data,alpha):
+    # alpha：平滑系数
+
+    # 创建一个与 data 形状相同的数组 result，并将数组中的元素全部初始化为零。
+    result = np.zeros_like(data)
+
+    #  初始化 result 数组中的第一个元素为 data 数组中的第一个元素
+    result[0]= data[0]
+    for i in range(1,len(data)):
+
+        # 使用SES公式更新 result 数组中的值。
+        result[i] = data[i] * alpha + result[i-1] * (1-alpha)
+    return result
+
+
+if __name__ == '__main__':
+    # 参数设置
+    window_size = 10
+    alpha = 0.2
+    plt.figure(figsize=(10, 5))
+
+    # 可视化带噪声的原始时序数据
+    plt.plot(time_series_data, color='blue',label='Original Data')
+
+    # 可视化移动平均后的时序数据
+    plt.plot(range(window_size-1, len(time_series_data)), MA(time_series_data,window_size),color='red',label='Moving Average')
+
+    # 可视化简单指数平滑后的时序数据
+    plt.plot(SES(time_series_data, alpha), color='green', label='Simple Exponential Smoothing')
+
+    plt.title('Time Series Data with Smoothing Methods')
+    plt.xlabel('Time')
+    plt.ylabel('Value')
+    plt.legend()
+    plt.savefig('./Output.png')
+    plt.show()
