@@ -1,0 +1,123 @@
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import matplotlib.pyplot as plt
+
+import os
+
+# 设置环境变量 'KMP_DUPLICATE_LIB_OK' 为 'TRUE'
+# 这是一个临时解决方案，用于避免由于多个 OpenMP 运行时库初始化冲突引起的错误
+# 在生产环境中，应确保仅链接一个 OpenMP 运行时库，以避免性能问题或错误结果
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
+
+'（1）随机生成带噪声的时序数据'
+np.random.seed(2)
+
+# 随机生成干净的时序数据
+cleaned_data = np.sin(np.linspace(0,50,500))
+
+# 向干净的时序数据中添加噪声，以形成验证数据
+# np.random.normal(0,0.5,500)用来生成500个随机数（充当噪声），且这些随机数服从均值为0,标准差为0.5的正态分布。
+val_time_series_data = cleaned_data + np.random.normal(0,0.5,500)
+
+
+'（2）预处理'
+'标准化(Normalization)'
+def normalize(data):
+    Nor_result = (data - np.min(data)) / (np.max(data) - np.min(data))
+    return Nor_result
+
+'去噪(Denoising)'
+# 搭建去噪自动编码器
+class DenoisingAE(nn.Module):
+    def __init__(self, input_dim, hidden_dim):
+        super(DenoisingAE, self).__init__()
+        self.encoder = nn.Sequential(
+            nn.Linear(in_features=input_dim, out_features=hidden_dim),
+            nn.ReLU()
+        )
+        self.decoder = nn.Sequential(
+            nn.Linear(in_features=hidden_dim, out_features=input_dim),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        x = self.encoder(x)
+        x = self.decoder(x)
+        return x
+
+# 创建实例对象
+input_dim = 1
+hidden_dim = 10
+epochs = 1000
+lr = 0.0001
+
+# nn.MSELoss()是一个类，需要实例化后才能使用
+# F.cross_entropy()是一个函数，可以直接调用，无需实例化
+Loss = nn.MSELoss()
+DAE = DenoisingAE(input_dim, hidden_dim)
+optimizer = optim.Adam(DAE.parameters(), lr=lr)
+
+'''
+1. 对时序数据进行去噪与常规的监督学习任务不同：常规的监督学习任务（如图像识别任务）在训练、验证、测试时需要使用不同的图像数据集，这些图像数据集之间不
+   能有重叠部分，以保证模型的泛化能力和性能。而对时序数据进行去噪则不一样，因为去噪自编码器的训练是自监督的，这意味着输入数据（带噪声的时序数据）
+   和目标数据（干净的时序数据）是从同一数据生成得到的。
+2. 去噪自编码器的训练数据：向干净的时序数据“A”中加入噪声“B”，得到带噪声的时序数据“A+B”，将其作为训练数据。
+              验证数据：向干净的时序数据“A”中加入噪声“C”，得到带噪声的时序数据“A+C”，将其作为验证数据。
+   可以看出，训练数据和验证数据都是基于同一数据生成得到的，然后再分别添加不同的噪声，以保证训练集和验证集的独立性。（这与常规的监督学习任务不同）
+3. 训练阶段的原理：先使用DAE对训练数据进行去噪，然后将其输出与干净的时序数据进行比对，最后计算损失并更新模型参数
+'''
+
+# 将干净的时序数据转换为tensor
+cleaned_data_tensor = torch.tensor(cleaned_data, dtype=torch.float32).view(-1,1)
+
+# 添加额外的噪声，以形成训练数据
+train_time_series_data = cleaned_data_tensor + 0.5 * torch.randn_like(cleaned_data_tensor)
+
+# 使用训练数据来训练DAE
+DAE.train()
+for i in range(epochs):
+    Output = DAE(train_time_series_data)
+
+    # 将DAE的输出与干净的时序数据进行比对，计算损失
+    train_loss = Loss(Output,cleaned_data_tensor)
+    optimizer.zero_grad()
+    train_loss.backward()
+    optimizer.step()
+    if epochs % 10 == 0:
+        print('Epoch {}|{} , Loss: {:.4f}'.format(i+1, epochs, train_loss.item()))
+
+# 训练完成后，先将验证数据转换为tensor，然后再使用DAE进行去噪，得到目标数据（此时为tensor类型），最后将其与tensor类型的干净时序数据做对比。
+val_time_series_data_tensor = torch.tensor(val_time_series_data,dtype=torch.float32).view(-1,1)
+target_data = DAE(val_time_series_data_tensor)
+val_loss = Loss(target_data,cleaned_data_tensor)
+print('目标数据与干净数据之间的差异值：', val_loss.item())
+
+
+if __name__ == '__main__':
+
+    # 可视化干净的时序数据
+    plt.figure(figsize=(10,5))
+    plt.plot(cleaned_data,label='Cleaned Data',color='blue',linestyle='-')  # 实线
+
+    # 可视化验证数据
+    plt.plot(val_time_series_data,label='Validation Data',color='red', linestyle='--')  # 虚线
+
+    # 可视化标准化后的验证数据
+    plt.plot(normalize(val_time_series_data),label='Normalized Validation Data',color='green',linestyle=':')  # 点线
+
+    # 可视化训练数据
+    plt.plot(train_time_series_data.detach().numpy(),label='Training Data',color='yellow', linestyle='-.')  # 点划线
+
+    # 可视化目标数据
+    plt.plot(target_data.detach().numpy(),label='Target Data',color='purple', linestyle='dashdot')
+
+    plt.xlabel('Time')
+    plt.ylabel('Value')
+    plt.title('Time Series Data with Preprocessing')
+    plt.legend()
+    plt.savefig('./Preprocessed')
+    plt.show()
+
+
